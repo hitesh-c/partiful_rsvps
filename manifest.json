@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Partiful RSVPs",
-  "version": "1.1",
+  "version": "1.3.1",
   "description": "Automates RSVP and questionnaire flows on Partiful events based on saved profile data.",
   "icons": {
     "16": "icons/icon16.png",

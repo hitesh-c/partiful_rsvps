@@ -10,16 +10,31 @@
     <header class="page-header">
       <img class="page-header__logo" src="../icons/icon128.png" alt="" width="28" height="28">
       <h1>Partiful RSVPs</h1>
-      <p>Changes save automatically<span class="save-status" id="save-status" role="status" aria-live="polite" hidden></span></p>
+      <span class="version-badge" id="version-badge"></span>
+      <p class="save-status" id="save-status" role="status" aria-live="polite">Changes save automatically</p>
     </header>
 
     <div class="layout">
     <div class="layout__main">
+    <section id="pending-section" hidden>
+      <details class="section" open>
+        <summary>
+          <h2>Questions to answer</h2>
+          <span class="section-count" id="pending-count" data-tone="new"></span>
+        </summary>
+        <div class="card">
+          <p>New questions found while running the queue, most frequent first. Save an answer once and it moves to Custom Question Fields and is reused for every event. Events waiting on a required answer can then be retried.</p>
+          <div id="pending-list"></div>
+        </div>
+      </details>
+    </section>
+
 
     <section id="profile-section">
       <details class="section">
         <summary>
           <h2>Profile Basics</h2>
+          <span class="section-count" id="profile-count"></span>
         </summary>
       <form id="profile-form" class="card grid-2">
         <label>First name
@@ -67,6 +82,7 @@
         <summary>
           <h2>Dropdown Fields</h2>
           <button type="button" class="info-btn" data-info="dropdown-info" aria-expanded="false" aria-controls="dropdown-info" title="How matching works">i</button>
+          <span class="section-count" id="dropdown-count"></span>
         </summary>
       <div class="card">
         <div class="info-panel" id="dropdown-info" hidden>
@@ -91,6 +107,7 @@
         <summary>
           <h2>Custom Question Fields</h2>
           <button type="button" class="info-btn" data-info="question-info" aria-expanded="false" aria-controls="question-info" title="How matching works">i</button>
+          <span class="section-count" id="question-count"></span>
         </summary>
       <div class="card">
         <div class="info-panel" id="question-info" hidden>
@@ -113,6 +130,7 @@
       <details class="section">
         <summary>
           <h2>RSVP Defaults</h2>
+          <span class="section-count" id="rsvp-count"></span>
         </summary>
       <form id="rsvp-form" class="card grid-2">
         <label>RSVP choice
@@ -159,11 +177,13 @@
       <details class="section" open>
         <summary>
           <h2>Automation Queue</h2>
+          <span class="section-count" id="automation-count"></span>
         </summary>
       <form id="automation-form" class="card">
         <label>
           <span>Event URLs <span class="count-chip" id="event-count">0</span></span>
           <textarea name="eventList" rows="6" placeholder="Paste Partiful event links, one per line"></textarea>
+          <small class="field-warning" id="event-warning" hidden></small>
         </label>
         <div class="option-row">
           <label title="How many event tabs run at the same time">Tabs at once
@@ -182,6 +202,17 @@
               <option value="600000">600 sec</option>
             </select>
           </label>
+          <label title="Extra attempts when an event fails or times out. Closed events, bad links and unanswered questions are never retried.">Retries
+            <select name="maxRetries">
+              <option value="0">None</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+        </div>
+        <div class="option-row">
           <label class="inline" title="Open each event in the foreground so you can watch it being filled">
             <input type="checkbox" name="makeTabsVisible">
             Show tabs
@@ -190,6 +221,10 @@
             <input type="checkbox" name="keepTabsOpen">
             Keep tabs open
           </label>
+          <label class="inline" title="Optional questions with no saved answer are left blank and not listed under Questions to answer. Required ones are always listed.">
+            <input type="checkbox" name="skipOptionalQuestions">
+            Skip optional unmatched questions
+          </label>
         </div>
       </form>
       <div class="card" id="automation-controls">
@@ -197,11 +232,13 @@
           <span class="queue-badge" id="queue-badge" data-state="idle">Idle</span>
           <span id="queue-summary">No events run yet</span>
         </div>
+        <div class="notice" id="queue-notice" role="alert" hidden></div>
         <div class="queue-bar" aria-hidden="true"><div id="queue-bar-fill"></div></div>
         <div class="button-row">
           <button type="button" id="start-automation">Start queue</button>
           <button type="button" id="pause-automation" class="secondary">Pause</button>
           <button type="button" id="clear-automation" class="secondary">Clear progress</button>
+          <button type="button" id="retry-automation" hidden>Retry events needing answers</button>
         </div>
         <div id="automation-log"></div>
       </div>
@@ -252,9 +289,24 @@
     </details>
   </template>
 
+  <template id="pending-template">
+    <div class="pending-item">
+      <div class="pending-item__head">
+        <span class="pending-item__label"></span>
+        <span class="tag"></span>
+        <span class="pending-item__events"></span>
+      </div>
+      <div class="pending-item__row">
+        <span class="pending-item__control"></span>
+        <button type="button" class="pending-save">Save answer</button>
+        <button type="button" class="pending-dismiss secondary" title="Hide this question and leave it blank">Dismiss</button>
+      </div>
+    </div>
+  </template>
+
   <template id="question-template">
     <details class="field-item">
-      <summary><span class="field-title"></span><span class="field-summary"></span></summary>
+      <summary><span class="field-title"></span><span class="field-summary"></span><span class="field-frequency"></span></summary>
     <fieldset class="question-rule">
       <label>Match type
         <select name="matchType">

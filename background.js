@@ -28,6 +28,8 @@ function createDefaultSettings() {
       eventList: [],
       maxConcurrent: 1,
       visitDuration: 120000,
+      maxRetries: 2,
+      skipOptionalQuestions: true,
       keepTabsOpen: false,
       makeTabsVisible: false,
       status: 'idle',
@@ -137,6 +139,7 @@ const automationState = {
   activeTabs: new Map(),
   maxConcurrent: 1,
   visitDuration: 5000,
+  maxRetries: 2,
   keepTabsOpen: false,
   makeTabsVisible: false
 };
@@ -168,10 +171,7 @@ async function restoreState() {
     ...job,
     index
   }));
-  automationState.maxConcurrent = Math.max(1, settings.automation.maxConcurrent || 1);
-  automationState.visitDuration = Math.max(120000, settings.automation.visitDuration || 120000);
-  automationState.keepTabsOpen = Boolean(settings.automation.keepTabsOpen);
-  automationState.makeTabsVisible = Boolean(settings.automation.makeTabsVisible);
+  applyAutomationConfig(settings);
 
   const stored = await chrome.storage.session.get([ACTIVE_TABS_KEY]);
   for (const [tabId, saved] of stored[ACTIVE_TABS_KEY] || []) {
@@ -199,11 +199,27 @@ function persistActiveTabs() {
   return chrome.storage.session.set({ [ACTIVE_TABS_KEY]: entries });
 }
 
-chrome.alarms.onAlarm.addListener(async (alarm) => {
+chrome.alarms.onAlarm.addListener((alarm) => {
   if (!alarm.name.startsWith(TIMEOUT_ALARM_PREFIX)) return;
-  await ensureState();
-  handleTabTimeout(Number(alarm.name.slice(TIMEOUT_ALARM_PREFIX.length)));
+  const tabId = Number(alarm.name.slice(TIMEOUT_ALARM_PREFIX.length));
+  runSafely('handle an event timeout', () => handleTabTimeout(tabId));
 });
+
+// Restores state, runs the handler, and surfaces any error in the automation log
+// instead of failing silently inside the service worker.
+async function runSafely(action, handler) {
+  try {
+    await ensureState();
+    await handler();
+  } catch (error) {
+    console.error(`Failed to ${action}`, error);
+    try {
+      await appendLog(`⚠️ Could not ${action}: ${error?.message || error}`);
+    } catch (logError) {
+      console.error('Could not write to the automation log', logError);
+    }
+  }
+}
 
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await getSettings();
@@ -220,19 +236,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       getSettings().then((settings) => sendResponse({ settings }));
       return true;
     case 'automation:start':
-      ensureState().then(startAutomation);
+      runSafely('start the queue', startAutomation);
       break;
     case 'automation:pause':
-      ensureState().then(pauseAutomation);
+      runSafely('pause the queue', pauseAutomation);
       break;
     case 'automation:clear':
-      ensureState().then(clearAutomation);
+      runSafely('clear progress', clearAutomation);
+      break;
+    case 'automation:retryNeedsAnswers':
+      runSafely('retry events', retryNeedsAnswers);
       break;
     case 'automation:updateSettings':
-      ensureState().then(refreshAutomationConfig);
+      runSafely('apply settings', refreshAutomationConfig);
       break;
     case 'automation:itemComplete':
-      ensureState().then(() => handleAutomationCompletion(sender?.tab?.id, message));
+      runSafely('record an event result', () => handleAutomationCompletion(sender?.tab?.id, message));
       break;
     default:
       break;
@@ -240,8 +259,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
-  await ensureState();
+chrome.tabs.onRemoved.addListener((tabId) => runSafely('handle a closed tab', async () => {
   if (automationState.activeTabs.has(tabId)) {
     appendLog(`Tab ${tabId} closed before completion.`);
     const { job } = automationState.activeTabs.get(tabId);
@@ -250,9 +268,10 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     automationState.activeTabs.delete(tabId);
     chrome.alarms.clear(TIMEOUT_ALARM_PREFIX + tabId);
     await persistActiveTabs();
-    maybeResumeQueue();
+    await updateAutomationSettings({ progress: automationState.queue });
+    if (!(await finishQueueIfDone())) maybeResumeQueue();
   }
-});
+}));
 
 async function getSettings() {
   const stored = await chrome.storage.local.get(['settings']);
@@ -278,21 +297,29 @@ async function startAutomation() {
     return;
   }
   const settings = await getSettings();
-  const eventList = (settings.automation.eventList || []).filter(Boolean);
+  const eventList = [...new Set((settings.automation.eventList || []).map((url) => String(url).trim()).filter(Boolean))];
   if (!eventList.length) {
-    appendLog('No event URLs queued.');
+    appendLog('No event URLs queued. Paste Partiful event links first.');
+    return;
+  }
+
+  const invalid = eventList.filter((url) => !isPartifulEventUrl(url));
+  if (invalid.length === eventList.length) {
+    appendLog('None of the queued links are Partiful event links (https://partiful.com/e/…).');
     return;
   }
 
   automationState.status = 'running';
-  automationState.queue = eventList.map((url, index) => ({ url, status: 'pending', index, attempts: 0 }));
-  automationState.maxConcurrent = Math.max(1, settings.automation.maxConcurrent || 1);
-  automationState.visitDuration = Math.max(120000, settings.automation.visitDuration || 120000);
-  automationState.keepTabsOpen = Boolean(settings.automation.keepTabsOpen);
-  automationState.makeTabsVisible = Boolean(settings.automation.makeTabsVisible);
+  automationState.queue = eventList.map((url, index) => (isPartifulEventUrl(url)
+    ? { url, status: 'pending', index, attempts: 0 }
+    : { url, status: 'failed', index, attempts: 0, result: 'Not a Partiful event link' }));
+  if (invalid.length) {
+    appendLog(`Skipping ${invalid.length} link(s) that are not Partiful events: ${invalid.slice(0, 3).join(', ')}${invalid.length > 3 ? '…' : ''}`);
+  }
+  applyAutomationConfig(settings);
 
   await updateAutomationSettings({ status: 'running', progress: automationState.queue });
-  appendLog(`Starting automation for ${eventList.length} event(s).`);
+  appendLog(`Starting automation for ${eventList.length - invalid.length} event(s).`);
   if (automationState.makeTabsVisible) {
     appendLog('Debug mode: Tabs will be visible so you can watch the filling.');
   }
@@ -327,12 +354,19 @@ async function clearAutomation() {
   appendLog('Automation state cleared.');
 }
 
+function applyAutomationConfig(settings) {
+  const config = settings.automation || {};
+  const retries = Number(config.maxRetries);
+  automationState.maxConcurrent = Math.max(1, config.maxConcurrent || 1);
+  automationState.visitDuration = Math.max(120000, config.visitDuration || 120000);
+  automationState.maxRetries = Number.isFinite(retries) ? Math.min(10, Math.max(0, retries)) : 2;
+  automationState.keepTabsOpen = Boolean(config.keepTabsOpen);
+  automationState.makeTabsVisible = Boolean(config.makeTabsVisible);
+}
+
 async function refreshAutomationConfig() {
   const settings = await getSettings();
-  automationState.maxConcurrent = Math.max(1, settings.automation.maxConcurrent || 1);
-  automationState.visitDuration = Math.max(120000, settings.automation.visitDuration || 120000);
-  automationState.keepTabsOpen = Boolean(settings.automation.keepTabsOpen);
-  automationState.makeTabsVisible = Boolean(settings.automation.makeTabsVisible);
+  applyAutomationConfig(settings);
 }
 
 async function maybeResumeQueue() {
@@ -351,8 +385,7 @@ async function maybeResumeQueue() {
     try {
       tab = await createTab(nextJob.url);
     } catch (error) {
-      nextJob.status = 'failed';
-      nextJob.result = error?.message || 'Failed to open tab';
+      failJob(nextJob, `Could not open tab: ${error?.message || 'unknown error'}`);
       await updateAutomationSettings({ progress: automationState.queue });
       continue;
     }
@@ -365,6 +398,8 @@ async function maybeResumeQueue() {
     scheduleTimeoutForTab(tab.id);
   }
   await updateAutomationSettings({ progress: automationState.queue });
+  // If every remaining event failed before a tab could open, nothing else will end the run.
+  await finishQueueIfDone();
 }
 
 function scheduleTimeoutForTab(tabId) {
@@ -377,10 +412,9 @@ function scheduleTimeoutForTab(tabId) {
 
 async function handleTabTimeout(tabId) {
   if (!automationState.activeTabs.has(tabId)) return;
-  appendLog(`Timeout reached for tab ${tabId}. Closing.`);
   const { job } = automationState.activeTabs.get(tabId) || {};
   if (job) {
-    job.status = 'timeout';
+    failJob(job, 'Timed out waiting for the event page', { tabId, finalStatus: 'timeout' });
   }
   automationState.activeTabs.delete(tabId);
   await persistActiveTabs();
@@ -402,40 +436,50 @@ async function finishQueueIfDone() {
   await updateAutomationSettings({ status: 'idle' });
   const completedCount = automationState.queue.filter((item) => item.status === 'completed').length;
   const failedCount = automationState.queue.filter((item) => item.status === 'failed' || item.status === 'timeout').length;
-  appendLog(`Automation queue finished: ${completedCount} completed, ${failedCount} failed.`);
+  const needsCount = automationState.queue.filter((item) => item.status === 'needs_answers').length;
+  appendLog(`Automation queue finished: ${completedCount} completed, ${needsCount} need answers, ${failedCount} failed.`);
+  if (needsCount) {
+    appendLog('Answer the new questions under "Questions to answer", then click "Retry".');
+  }
   return true;
 }
 
 async function handleAutomationCompletion(tabId, message) {
   if (!automationState.activeTabs.has(tabId)) {
-    appendLog(`Received completion from unknown tab ${tabId}.`);
+    // e.g. an event page the user opened by hand while the queue is running.
+    appendLog(`Ignored a result from tab ${tabId}, which is not part of the queue.`);
     return;
   }
   const entry = automationState.activeTabs.get(tabId);
   chrome.alarms.clear(TIMEOUT_ALARM_PREFIX + tabId);
   const { job } = entry;
-  
+
+  await recordQuestions(message.questions, job.url);
+
   if (message.success) {
     job.status = 'completed';
     job.result = message.detail || '';
     appendLog(`Tab ${tabId} completed: ${job.result || ''}`.trim());
+  } else if (message.needsAnswers) {
+    // Unknown required questions: retrying won't help until the user adds answers.
+    job.status = 'needs_answers';
+    job.result = message.detail || 'Needs answers';
+    appendLog(`Tab ${tabId} skipped for now — ${job.result}`);
+  } else if (message.fatal === 'login') {
+    // Every event would fail the same way, so stop instead of burning through the queue.
+    job.status = 'pending';
+    job.attempts = Math.max(0, job.attempts - 1);
+    automationState.status = 'paused';
+    await updateAutomationSettings({ status: 'paused' });
+    appendLog('⚠️ Queue paused: you are not logged in to Partiful. Log in at partiful.com in this browser, then click "Resume queue".');
   } else {
-    const maxRetries = 3;
-    if (job.attempts < maxRetries) {
-      job.status = 'pending';
-      job.result = `Retry ${job.attempts}/${maxRetries}: ${message.detail || 'autofill failed'}`;
-      appendLog(`Tab ${tabId} failed, will retry (attempt ${job.attempts}/${maxRetries}): ${message.detail || ''}`.trim());
-    } else {
-      job.status = 'failed';
-      job.result = `Failed after ${maxRetries} attempts: ${message.detail || ''}`;
-      appendLog(`Tab ${tabId} failed permanently after ${maxRetries} attempts: ${message.detail || ''}`.trim());
-    }
+    failJob(job, message.detail || 'Autofill failed', { permanent: Boolean(message.permanent), tabId });
   }
-  
+
   automationState.activeTabs.delete(tabId);
   await persistActiveTabs();
   await updateAutomationSettings({ progress: automationState.queue });
-  
+
   const shouldCloseTab = message.closeTab !== false && !automationState.keepTabsOpen;
   if (shouldCloseTab) {
     await removeTab(tabId);
@@ -446,6 +490,84 @@ async function handleAutomationCompletion(tabId, message) {
   if (!(await finishQueueIfDone())) {
     maybeResumeQueue();
   }
+}
+
+// Retries are user-controlled: maxRetries is the number of extra attempts after the first.
+function failJob(job, reason, { permanent = false, tabId, finalStatus = 'failed' } = {}) {
+  const maxRetries = automationState.maxRetries;
+  const where = tabId ? `Tab ${tabId}` : job.url;
+  if (!permanent && job.attempts <= maxRetries) {
+    job.status = 'pending';
+    job.result = `Retry ${job.attempts}/${maxRetries}: ${reason}`;
+    appendLog(`${where} failed, will retry (${job.attempts}/${maxRetries}): ${reason}`);
+    return;
+  }
+  job.status = finalStatus;
+  if (permanent) {
+    job.result = reason;
+    appendLog(`${where} skipped: ${reason}`);
+  } else {
+    job.result = `Failed after ${job.attempts} attempt(s): ${reason}`;
+    appendLog(`${where} failed after ${job.attempts} attempt(s): ${reason}`);
+  }
+}
+
+// Second pass: re-run only the events that were waiting on answers.
+async function retryNeedsAnswers() {
+  if (automationState.status === 'idle') {
+    // The in-memory queue is only restored while running/paused; rebuild it from storage.
+    const settings = await getSettings();
+    automationState.queue = (settings.automation.progress || []).map((job, index) => ({ attempts: 0, ...job, index }));
+    await refreshAutomationConfig();
+  }
+  const waiting = automationState.queue.filter((job) => job.status === 'needs_answers');
+  if (!waiting.length) {
+    appendLog('No events are waiting on answers.');
+    return;
+  }
+  waiting.forEach((job) => {
+    job.status = 'pending';
+    job.attempts = 0;
+    job.result = '';
+  });
+  automationState.status = 'running';
+  await updateAutomationSettings({ status: 'running', progress: automationState.queue });
+  appendLog(`Retrying ${waiting.length} event(s) that needed answers.`);
+  maybeResumeQueue();
+}
+
+// Every unique question seen across events, keyed by normalised label. `events` gives the
+// frequency; `open` means it currently has no answer and should be shown to the user.
+const PENDING_QUESTIONS_KEY = 'pendingQuestions';
+let pendingWriteChain = Promise.resolve();
+
+function pendingQuestionKey(label) {
+  return String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function recordQuestions(questions, eventUrl) {
+  if (!Array.isArray(questions) || !questions.length) return Promise.resolve();
+  const run = pendingWriteChain.then(async () => {
+    const stored = await chrome.storage.local.get([PENDING_QUESTIONS_KEY]);
+    const pending = stored[PENDING_QUESTIONS_KEY] || {};
+    questions.forEach((question) => {
+      const key = pendingQuestionKey(question.label);
+      if (!key) return;
+      const entry = pending[key] || { label: question.label, events: [], firstSeen: Date.now() };
+      entry.type = question.type === 'dropdown' ? 'dropdown' : 'text';
+      entry.options = [...new Set([...(entry.options || []), ...(question.options || [])])];
+      entry.required = Boolean(entry.required || question.required);
+      entry.lastSeen = Date.now();
+      if (eventUrl && !entry.events.includes(eventUrl)) entry.events.push(eventUrl);
+      // Unanswered again means any earlier answer is gone or no longer matches.
+      entry.open = !question.answered;
+      delete entry.answered;
+      pending[key] = entry;
+    });
+    await chrome.storage.local.set({ [PENDING_QUESTIONS_KEY]: pending });
+  });
+  pendingWriteChain = run.catch((error) => console.error('Failed to record questions', error));
+  return pendingWriteChain;
 }
 
 // Settings writes are read-modify-write; run them one at a time so overlapping
@@ -534,13 +656,23 @@ function mergeArrayById(defaults, stored) {
   return result;
 }
 
+function isPartifulEventUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' &&
+      /(^|\.)partiful\.com$/.test(parsed.hostname) &&
+      /^\/e\/[^/]+/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function createTab(url) {
   return new Promise((resolve, reject) => {
     const active = automationState.makeTabsVisible;
     chrome.tabs.create({ url, active }, (tab) => {
       if (chrome.runtime.lastError) {
-        appendLog(`Failed to open ${url}: ${chrome.runtime.lastError.message}`);
-        reject(chrome.runtime.lastError);
+        reject(new Error(chrome.runtime.lastError.message));
       } else {
         resolve(tab);
       }
@@ -551,6 +683,8 @@ function createTab(url) {
 function removeTab(tabId) {
   return new Promise((resolve) => {
     chrome.tabs.remove(tabId, () => {
+      // The tab may already be gone (closed by the user); that's fine.
+      void chrome.runtime.lastError;
       resolve();
     });
   });

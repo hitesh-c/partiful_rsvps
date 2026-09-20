@@ -19,7 +19,7 @@
 ### 4. Verify Installation
 You should see:
 - ✅ **Partiful RSVPs** card appear in your extensions list
-- ✅ Version: 1.1
+- ✅ Version: 1.3.1
 - ✅ Status: Enabled (toggle should be ON/blue)
 
 ### 5. Pin the Extension (Optional but Recommended)

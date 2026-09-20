@@ -4,8 +4,15 @@
   let flowStarted = false;
   let automationReported = false;
   let phase = "booting";
+  const filledTriggers = new WeakSet();
 
   const QUESTION_GROUP_SELECTOR = "[data-testid='question'], [class*='QuestionnaireForm_question__'], fieldset, label";
+  // Partiful's dropdown question is a bare <button type="button"> with no ARIA hints, so any
+  // button inside a question block counts as a dropdown trigger.
+  const CONTROL_SELECTOR = "input:not([type='hidden']), textarea, select, [role='combobox'], " +
+    "button[aria-haspopup='listbox'], button[data-testid*='select' i], " +
+    "[class*='QuestionnaireForm_question__'] button[type='button']";
+  const DROPDOWN_TRIGGER_SELECTOR = "[role='combobox'], button, [aria-haspopup='listbox']";
   const MAX_WAIT = 90000;
   const POLL_MS = 250;
 
@@ -18,6 +25,7 @@
       questionsFailed: 0,
       missingRequired: [],
       dropdownsFailed: [],
+      questions: [],
       details: []
     };
   }
@@ -71,11 +79,31 @@
     if (!settings) return;
 
     phase = "waiting_for_rsvp";
-    const rsvpButton = await waitFor(findRsvpButton, MAX_WAIT);
-    if (!rsvpButton) {
-      fail("Could not find the RSVP button after waiting for authentication.");
+    const flowStart = Date.now();
+    const found = await waitFor(() => {
+      // Already applied / registered: the RSVP button is replaced by a status button.
+      const status = findResponseStatus();
+      if (status) return { status };
+      const button = findRsvpButton();
+      if (button) return { button };
+      // Give the page a few seconds to render before trusting "closed" wording on it.
+      const problem = detectPageProblem(Date.now() - flowStart > 8000);
+      return problem ? { problem } : null;
+    }, MAX_WAIT);
+
+    if (found?.status) {
+      reportExistingStatus(found.status);
       return;
     }
+    if (found?.problem) {
+      fail(found.problem, { permanent: true });
+      return;
+    }
+    if (!found) {
+      fail("Could not find an RSVP button on this page. You may already be registered, or the event layout is unusual.");
+      return;
+    }
+    const rsvpButton = found.button;
 
     phase = "clicking_rsvp";
     fillTracker.details.push("Clicking RSVP after authentication delay.");
@@ -101,6 +129,14 @@
 
   async function handleRsvpStep(modal) {
     phase = "rsvp_step";
+
+    // Logged-out visitors are asked for a phone number; every event would fail the same way.
+    const phoneInput = await waitFor(() => findRsvpForm(modal) && [...modal.querySelectorAll("input[type='tel']")].find(isElementVisible), 1500);
+    if (phoneInput) {
+      fail("Not logged in to Partiful.", { fatal: "login" });
+      return;
+    }
+
     const choiceLabel = settings.rsvp.choice === "cant_go" ? "Can't Go" : "Going";
     await waitFor(() => findRsvpForm(modal), 15000);
 
@@ -161,6 +197,8 @@
     phase = "waiting_for_questionnaire";
 
     const nextResult = await waitFor(() => {
+      const rsvpError = findPartifulError();
+      if (rsvpError) return { error: rsvpError };
       if (isVerificationStep()) return { verification: true };
       const form = findQuestionnaire();
       if (form) return { form };
@@ -169,7 +207,11 @@
     }, MAX_WAIT);
 
     if (!nextResult) {
-      fail("Continue was clicked, but the questionnaire did not load.");
+      fail("Continue was clicked, but nothing happened. Partiful may be slow or the form has a field this extension doesn't know.");
+      return;
+    }
+    if (nextResult.error) {
+      fail(nextResult.error);
       return;
     }
 
@@ -214,6 +256,7 @@
     }
 
     fillTracker.details.push("Detected " + groups.length + " questionnaire field(s).");
+    const seen = [];
 
     for (const group of groups) {
       const label = extractLabel(group);
@@ -228,6 +271,8 @@
         fillTracker.details.push('Skipped "' + label + '" — no control found.');
         continue;
       }
+
+      seen.push({ label, control: controls[0] });
 
       const response = resolveResponse(label, controls[0]);
       if (!response || response.value === "") {
@@ -248,9 +293,13 @@
     await sleep(300);
 
     const missing = collectMissingRequired(form);
+    fillTracker.questions = describeQuestions(seen, missing);
+
+    // Unknown required questions: don't block the queue. Report them so the user can add
+    // answers, and move on. Unknown optional questions are simply left blank.
     if (missing.length) {
       fillTracker.missingRequired = missing;
-      fail("Required questions still need answers: " + missing.join(" | "));
+      needAnswers("Needs answers: " + missing.join(" | "));
       return;
     }
 
@@ -270,12 +319,18 @@
     fillTracker.details.push("Submitted questionnaire.");
 
     const completed = await waitFor(() => {
+      const rsvpError = findPartifulError();
+      if (rsvpError) return { error: rsvpError };
       if (isRegistrationComplete()) return true;
       return !findQuestionnaire();
     }, 15000);
 
-    if (completed) {
-      complete("Registration completed successfully.");
+    if (completed?.error) {
+      fail(completed.error);
+    } else if (completed) {
+      // Give the page a moment to swap the RSVP button for the status button.
+      await waitFor(findResponseStatus, 3000);
+      complete(describeFinalStatus());
     } else {
       fail("The questionnaire was submitted, but completion could not be confirmed.");
     }
@@ -302,7 +357,7 @@
       }
     }
 
-    const controls = form.querySelectorAll("input:not([type='hidden']), textarea, select, [role='combobox'], button[aria-haspopup='listbox'], button[data-testid*='select' i]");
+    const controls = form.querySelectorAll(CONTROL_SELECTOR);
     for (const control of controls) {
       const group = findQuestionGroup(control, form);
       if (group && !seen.has(group)) {
@@ -329,18 +384,18 @@
   }
 
   function getControls(group, form) {
-    const own = [...group.querySelectorAll("input:not([type='hidden']), textarea, select, [role='combobox'], button[aria-haspopup='listbox'], button[data-testid*='select' i]")];
+    const own = [...group.querySelectorAll(CONTROL_SELECTOR)];
     if (own.length) return own;
 
-    if (group.matches("input,textarea,select,[role='combobox'],button[aria-haspopup='listbox'],button[data-testid*='select' i]")) return [group];
+    if (group.matches(CONTROL_SELECTOR)) return [group];
 
     return [];
   }
 
   function extractLabel(group) {
-    const control = group.matches("input,textarea,select,[role='combobox'],button[aria-haspopup='listbox'],button[data-testid*='select' i]")
+    const control = group.matches(CONTROL_SELECTOR)
       ? group
-      : group.querySelector("input:not([type='hidden']), textarea, select, [role='combobox']");
+      : group.querySelector(CONTROL_SELECTOR);
 
     if (!control) return "";
 
@@ -381,6 +436,54 @@
       control.getAttribute("placeholder") ||
       ""
     );
+  }
+
+  // Questions as the host defined them (text, required, dropdown options), from the page data.
+  function getEventQuestions() {
+    try {
+      const data = JSON.parse(document.getElementById("__NEXT_DATA__")?.textContent || "{}");
+      return data?.props?.pageProps?.event?.questionnaire?.questions || [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Every question on the form, flagged with whether it ended up answered (by us, or prefilled
+  // by Partiful from a previous response). Used for the "Questions to answer" list and frequency.
+  function describeQuestions(unanswered, missingLabels) {
+    const eventQuestions = getEventQuestions();
+    const missing = new Set(missingLabels.map(normalize));
+    const seen = new Set();
+
+    return unanswered.filter(({ label }) => {
+      const key = normalize(label);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map(({ label, control }) => {
+      const meta = eventQuestions.find((q) => normalize(q.text) === normalize(label)) || {};
+      let options = Array.isArray(meta.options) ? meta.options.map(String) : [];
+      if (!options.length && control.matches("select")) {
+        options = [...control.options].filter((o) => !o.disabled && o.value).map((o) => o.textContent.trim());
+      }
+      const isDropdown = options.length > 0 || control.matches("select, button");
+      return {
+        label,
+        type: isDropdown ? "dropdown" : "text",
+        options,
+        required: missing.has(normalize(label)) || Boolean(meta.required),
+        answered: isControlFilled(control)
+      };
+    });
+  }
+
+  function isControlFilled(control) {
+    if (control.matches("input[type='checkbox'], input[type='radio']")) return false;
+    if (control.matches("button")) {
+      const text = normalize(control.textContent);
+      return filledTriggers.has(control) || (text !== "" && text !== "select");
+    }
+    return String(control.value || "").trim() !== "";
   }
 
   // First text-bearing element in the group that is not a wrapper around the control itself.
@@ -531,10 +634,12 @@
       return selectOption(select, response.value, response.fallbacks || []);
     }
 
-    const trigger = controls.find((c) => c.matches("[role='combobox'], button, [aria-haspopup='listbox']"));
+    const trigger = controls.find((c) => c.matches(DROPDOWN_TRIGGER_SELECTOR));
     if (!trigger) return false;
 
-    return await selectCustomDropdown(trigger, response.value, response.fallbacks || []);
+    const selected = await selectCustomDropdown(trigger, response.value, response.fallbacks || []);
+    if (selected) filledTriggers.add(trigger);
+    return selected;
   }
 
   function setInputValue(input, value) {
@@ -586,6 +691,8 @@
     const option = await waitFor(() => findDropdownOption(candidates), 5000);
     if (!option) {
       fillTracker.dropdownsFailed.push(preferred);
+      // Close the popover again so it doesn't cover the next question.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       return false;
     }
 
@@ -595,7 +702,7 @@
 
   function findDropdownOption(candidates) {
     const nodes = document.querySelectorAll(
-      "[role='listbox'] [role='option'], [role='listbox'] button, [data-radix-popper-content-wrapper] [role='option'], [data-radix-popper-content-wrapper] button, ul[role='listbox'] li"
+      "[role='listbox'] [role='option'], [role='listbox'] button, [data-radix-popper-content-wrapper] [role='option'], [data-radix-popper-content-wrapper] button, ul[role='listbox'] li, button[aria-selected]"
     );
 
     for (const candidate of candidates) {
@@ -610,11 +717,13 @@
 
   function collectMissingRequired(form) {
     const missing = [];
-    const controls = [...form.querySelectorAll("input:not([type='hidden']), textarea, select, [role='combobox'], button[aria-haspopup='listbox'], button[data-testid*='select' i]")];
+    const controls = [...form.querySelectorAll(CONTROL_SELECTOR)];
     const radioGroups = new Set();
 
     for (const control of controls) {
       const questionGroup = findQuestionGroup(control, form);
+      // Icon buttons inside a text question (e.g. "clear") are not dropdown triggers.
+      if (control.matches("button") && questionGroup?.querySelector("input, textarea, select")) continue;
       if (!isRequiredControl(control, questionGroup)) continue;
 
       if (control.matches("input[type='radio']")) {
@@ -633,11 +742,7 @@
         continue;
       }
 
-      const value = control.matches("select")
-        ? control.value
-        : String(control.value || "");
-
-      if (!value.trim()) {
+      if (!isControlFilled(control)) {
         missing.push(extractLabel(questionGroup || control));
       }
     }
@@ -700,7 +805,9 @@
   }
 
   function findRsvpButton() {
-    const candidates = [...document.querySelectorAll("button, [role='button'], a")];
+    // Closed events show a disabled button such as "RSVP deadline passed" — never a target.
+    const candidates = [...document.querySelectorAll("button, [role='button'], a")]
+      .filter((el) => !el.disabled && el.getAttribute("aria-disabled") !== "true");
     const exact = candidates.find((el) => {
       const text = normalize(el.textContent || el.getAttribute("aria-label") || "");
       return isElementVisible(el) &&
@@ -732,6 +839,29 @@
     return elements.find((el) => isElementVisible(el) && normalize(el.textContent).includes(target)) || null;
   }
 
+  // States where retrying can never help. `settled` guards the wording checks until the page
+  // has had time to render, since an event description could contain the same words.
+  function detectPageProblem(settled) {
+    const title = normalize(document.title);
+    const text = normalize(document.body?.innerText || "");
+    if (title.startsWith("not found") || text.includes("page not found")) {
+      return "Event not found — check the link.";
+    }
+    if (!settled) return null;
+    if (text.includes("rsvps are turned off")) return "The host has turned off RSVPs for this event.";
+    if (text.includes("rsvp deadline passed")) return "The RSVP deadline has passed.";
+    if (text.includes("this event is full") || text.includes("event is full")) return "This event is full.";
+    return null;
+  }
+
+  function findPartifulError() {
+    const dialogs = [...document.querySelectorAll("[role='dialog']")].filter(isElementVisible);
+    const hit = dialogs.find((dialog) => normalize(dialog.textContent).includes("couldn t rsvp"));
+    if (!hit) return null;
+    const message = cleanLabel(hit.textContent).slice(0, 160);
+    return "Partiful reported an error: " + message;
+  }
+
   function isVerificationStep() {
     const text = normalize(document.body?.innerText || "");
     const phrases = [
@@ -752,19 +882,72 @@
     return phraseMatch && codeInputs.length > 0;
   }
 
+  // The page-level status button Partiful shows once you have responded. Hosts who approve
+  // guests manually leave you on "Pending" — that is a finished application, not a failure.
+  const RESPONSE_STATUSES = {
+    "pending": "pending",
+    "on the list": "approved",
+    "approved": "approved",
+    "waitlist": "waitlist",
+    "not approved": "rejected",
+    "rejected": "rejected",
+    "going": "going",
+    "maybe": "maybe",
+    "can t go": "declined"
+  };
+  const RSVP_CHOICES = ["going", "maybe", "declined"];
+
+  function findResponseStatus() {
+    const found = new Set();
+    for (const el of document.querySelectorAll("button, [role='button']")) {
+      if (el.closest("[role='dialog']") || !isElementVisible(el)) continue;
+      const status = RESPONSE_STATUSES[normalize(el.textContent || "")];
+      if (status) found.add(status);
+    }
+
+    const decided = [...found].filter((status) => !RSVP_CHOICES.includes(status));
+    if (decided.length) return decided[0];
+
+    // Going / Maybe / Can't Go shown together are the unanswered choices; one alone is your answer.
+    const choices = [...found].filter((status) => RSVP_CHOICES.includes(status));
+    return choices.length === 1 ? choices[0] : null;
+  }
+
+  function reportExistingStatus(status) {
+    const messages = {
+      pending: "Already applied — waiting for the host to approve.",
+      approved: "Already registered — you're on the list.",
+      going: "Already registered — you're going.",
+      waitlist: "Already on the waitlist.",
+      maybe: "Already responded \"Maybe\" — left unchanged.",
+      declined: "Already responded \"Can't Go\" — left unchanged."
+    };
+    if (status === "rejected") {
+      fail("The host did not approve your request for this event.", { permanent: true });
+      return;
+    }
+    complete(messages[status] || "Already responded.");
+  }
+
+  function describeFinalStatus() {
+    const status = findResponseStatus();
+    if (status === "pending") return "Applied — waiting for the host to approve.";
+    if (status === "waitlist") return "Added to the waitlist.";
+    return "Registration completed successfully.";
+  }
+
   function isRegistrationComplete() {
+    if (findResponseStatus()) return true;
     const text = normalize(document.body?.innerText || "");
     return [
       "you're going",
-      "youre going",
       "you're on the list",
-      "youre on the list",
+      "you're on the waitlist",
       "registration complete",
       "rsvp confirmed",
       "you're confirmed",
-      "youre confirmed",
       "see you there"
-    ].some((phrase) => text.includes(phrase));
+    ].some((phrase) => text.includes(normalize(phrase)));
   }
 
   function waitFor(factory, timeout) {
@@ -814,7 +997,7 @@
       getComputedStyle(element).display !== "none";
   }
 
-  function notifyAutomation(detail, success, closeTab) {
+  function notifyAutomation(detail, success, closeTab, options) {
     if (automationReported) return;
     if (!settings?.automation || settings.automation.status !== "running") return;
 
@@ -829,13 +1012,37 @@
       fillTracker.dropdownsFailed.length ? "Dropdowns not found: " + fillTracker.dropdownsFailed.join(", ") : null
     ].filter(Boolean).join(" | ");
 
-    chrome.runtime.sendMessage({
+    safeRuntimeMessage({
       type: "automation:itemComplete",
       success: Boolean(success),
+      needsAnswers: Boolean(options?.needsAnswers),
+      questions: fillTracker.questions || [],
+      eventUrl: location.origin + location.pathname,
       detail: summary,
       debugDetails: fillTracker.details,
+      permanent: Boolean(options?.permanent),
+      fatal: options?.fatal || null,
       closeTab: closeTab !== false
-    }, () => void chrome.runtime.lastError);
+    });
+  }
+
+  // Throws "Extension context invalidated" if the extension was reloaded while this tab was open.
+  function safeRuntimeMessage(payload, callback) {
+    try {
+      chrome.runtime.sendMessage(payload, (response) => {
+        const error = chrome.runtime.lastError;
+        if (callback) callback(error ? null : response);
+      });
+    } catch (error) {
+      console.warn("[Partiful RSVPs] Extension was reloaded; refresh this tab to reconnect.", error);
+      if (callback) callback(null);
+    }
+  }
+
+  function needAnswers(detail) {
+    phase = "needs_answers";
+    fillTracker.details.push(detail);
+    notifyAutomation(detail, false, true, { needsAnswers: true });
   }
 
   function complete(detail) {
@@ -843,19 +1050,16 @@
     notifyAutomation(detail, true, true);
   }
 
-  function fail(detail) {
+  function fail(detail, options) {
     phase = "failed";
     fillTracker.details.push(detail);
-    notifyAutomation(detail, false, false);
+    // Always release the tab; "Keep tabs open" in Options is the switch for inspecting failures.
+    notifyAutomation(detail, false, true, options);
   }
 
   async function fetchSettings() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "settings:get" }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(createEmptySettings());
-          return;
-        }
+      safeRuntimeMessage({ type: "settings:get" }, (response) => {
         resolve(response?.settings || createEmptySettings());
       });
     });

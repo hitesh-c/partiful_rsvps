@@ -40,7 +40,7 @@ See [INSTALLATION.md](INSTALLATION.md) for detailed setup guide.
 
 ## Recent Improvements
 
-**v1.1** (Latest)
+**v1.3.1** (Latest)
 - ✅ Fixed autofill success tracking (no more false positives)
 - ✅ Added automatic retry logic for failed events
 - ✅ Fixed settings merge to preserve user customizations

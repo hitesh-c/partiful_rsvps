@@ -29,6 +29,10 @@
         eventList: [],
         maxConcurrent: 1,
         visitDuration: 120000,
+        maxRetries: 2,
+        skipOptionalQuestions: true,
+        keepTabsOpen: false,
+        makeTabsVisible: false,
         status: 'idle',
         progress: [],
         log: []
@@ -133,6 +137,7 @@
   let settings = null;
 
   document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('version-badge').textContent = `v${chrome.runtime.getManifest().version}`;
     settings = await loadSettings();
     hydrateProfile();
     // Sections start collapsed; a brand-new user still needs to see where to begin.
@@ -145,13 +150,20 @@
     hydrateAutomation();
     wireEvents();
     loadSavedAt();
+    loadPendingQuestions();
+    updateSectionCounts();
   });
 
   function loadSettings() {
     return new Promise((resolve) => {
       chrome.storage.local.get(['settings'], (result) => {
+        if (chrome.runtime.lastError) {
+          console.error('Could not read settings', chrome.runtime.lastError);
+          setSaveStatus('Could not load saved settings — showing defaults', 'error');
+          result = {};
+        }
         const merged = deepMerge(createDefaultSettings(), result.settings || {});
-        if (!result.settings) {
+        if (!result.settings && !chrome.runtime.lastError) {
           chrome.storage.local.set({ settings: merged });
         }
         resolve(merged);
@@ -159,7 +171,7 @@
     });
   }
 
-  const AUTOMATION_CONFIG_KEYS = ['eventList', 'maxConcurrent', 'visitDuration', 'keepTabsOpen', 'makeTabsVisible'];
+  const AUTOMATION_CONFIG_KEYS = ['eventList', 'maxConcurrent', 'visitDuration', 'maxRetries', 'skipOptionalQuestions', 'keepTabsOpen', 'makeTabsVisible'];
   const AUTOSAVE_DELAY = 400;
   const SAVED_AT_KEY = 'settingsSavedAt';
   let pendingSaves = 0;
@@ -170,6 +182,7 @@
   // Writes one section on top of whatever is in storage, so the background worker's
   // queue status/progress/log are never overwritten with this page's stale copy.
   function saveSettings(section) {
+    updateSectionCounts();
     pendingSaves++;
     setSaveStatus('Saving…', 'saving');
     return new Promise((resolve) => {
@@ -206,7 +219,6 @@
   function setSaveStatus(text, state) {
     const el = document.getElementById('save-status');
     if (!el) return;
-    el.hidden = false;
     el.textContent = text;
     el.dataset.state = state;
   }
@@ -221,7 +233,7 @@
   function renderSavedAt() {
     if (!lastSavedAt || pendingSaves > 0) return;
     const el = document.getElementById('save-status');
-    setSaveStatus(`Last saved ${formatUtc(lastSavedAt)}`, 'saved');
+    setSaveStatus(`Last changes saved ${formatUtc(lastSavedAt)}`, 'saved');
     el.title = `${new Date(lastSavedAt).toLocaleString()} your time`;
   }
 
@@ -276,10 +288,12 @@
   function hydrateQuestions() {
     const container = document.getElementById('question-list');
     container.innerHTML = '';
-    settings.questions.forEach((rule, index) => {
-      const instance = createQuestionRuleElement(rule, index);
-      container.appendChild(instance);
-    });
+    settings.questions
+      .map((rule, index) => ({ rule, index, frequency: questionFieldFrequency(rule) }))
+      .sort((a, b) => b.frequency - a.frequency || a.index - b.index)
+      .forEach(({ rule, index }) => {
+        container.appendChild(createQuestionRuleElement(rule, index));
+      });
   }
 
   function hydrateRsvp() {
@@ -297,8 +311,10 @@
     form.elements.namedItem('eventList').value = (settings.automation.eventList || []).join('\n');
     setPresetValue(form.elements.namedItem('maxConcurrent'), settings.automation.maxConcurrent || 1);
     setPresetValue(form.elements.namedItem('visitDuration'), Math.max(120000, settings.automation.visitDuration || 120000));
+    setPresetValue(form.elements.namedItem('maxRetries'), settings.automation.maxRetries ?? 2);
     form.elements.namedItem('keepTabsOpen').checked = Boolean(settings.automation.keepTabsOpen);
     form.elements.namedItem('makeTabsVisible').checked = Boolean(settings.automation.makeTabsVisible);
+    form.elements.namedItem('skipOptionalQuestions').checked = settings.automation.skipOptionalQuestions !== false;
     renderAutomationLog();
     renderQueueStatus();
     updateEventCount();
@@ -316,10 +332,37 @@
     select.value = stringValue;
   }
 
+  function isPartifulEventUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' &&
+        /(^|\.)partiful\.com$/.test(parsed.hostname) &&
+        /^\/e\/[^/]+/.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   function updateEventCount() {
     const textarea = document.getElementById('automation-form').elements.namedItem('eventList');
-    const count = textarea.value.split('\n').filter((line) => line.trim()).length;
-    document.getElementById('event-count').textContent = String(count);
+    const lines = textarea.value.split('\n').map((line) => line.trim()).filter(Boolean);
+    document.getElementById('event-count').textContent = String(lines.length);
+
+    const invalid = lines.filter((line) => !isPartifulEventUrl(line)).length;
+    const duplicates = lines.length - new Set(lines).size;
+    const problems = [
+      invalid ? `${invalid} line${invalid === 1 ? ' is' : 's are'} not a Partiful event link (https://partiful.com/e/…) and will be skipped` : null,
+      duplicates ? `${duplicates} duplicate${duplicates === 1 ? '' : 's'} will be ignored` : null
+    ].filter(Boolean);
+    const warning = document.getElementById('event-warning');
+    warning.hidden = problems.length === 0;
+    warning.textContent = problems.join(' · ');
+  }
+
+  function showQueueNotice(text) {
+    const notice = document.getElementById('queue-notice');
+    notice.hidden = !text;
+    notice.textContent = text || '';
   }
 
   function renderQueueStatus() {
@@ -329,14 +372,20 @@
     const count = (...states) => progress.filter((job) => states.includes(job.status)).length;
     const done = count('completed');
     const failed = count('failed', 'timeout');
-    const finished = done + failed;
+    const needsAnswers = count('needs_answers');
+    const finished = done + failed + needsAnswers;
 
     const badge = document.getElementById('queue-badge');
     badge.dataset.state = status;
     badge.textContent = { running: 'Running', paused: 'Paused' }[status] || 'Idle';
 
     const parts = total
-      ? [`${finished} of ${total} events`, `${done} done`, failed ? `${failed} failed` : null].filter(Boolean)
+      ? [
+        `${finished} of ${total} events`,
+        `${done} done`,
+        needsAnswers ? `${needsAnswers} need answers` : null,
+        failed ? `${failed} failed` : null
+      ].filter(Boolean)
       : ['No events run yet'];
     document.getElementById('queue-summary').textContent = parts.join(' · ');
     document.getElementById('queue-bar-fill').style.width = total ? `${(finished / total) * 100}%` : '0%';
@@ -344,6 +393,177 @@
     document.getElementById('start-automation').disabled = status === 'running';
     document.getElementById('start-automation').textContent = status === 'paused' ? 'Resume queue' : 'Start queue';
     document.getElementById('pause-automation').disabled = status !== 'running';
+
+    const retryButton = document.getElementById('retry-automation');
+    retryButton.hidden = needsAnswers === 0;
+    retryButton.disabled = status === 'running';
+    retryButton.textContent = `Retry ${needsAnswers} event${needsAnswers === 1 ? '' : 's'} needing answers`;
+  }
+
+  // ---- Questions found during a run that had no answer ----
+  const PENDING_QUESTIONS_KEY = 'pendingQuestions';
+  let pendingQuestions = {};
+
+  function setSectionCount(id, text, title) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.title = title || '';
+  }
+
+  // Field counts on the right of each section header: answered / total.
+  function updateSectionCounts() {
+    const profileValues = Object.values(settings.profile);
+    const profileFilled = profileValues.filter(Boolean).length;
+    setSectionCount('profile-count', `${profileFilled}/${profileValues.length}`, `${profileFilled} of ${profileValues.length} profile fields filled in`);
+
+    const dropdownsSet = settings.dropdowns.filter((rule) => rule.preferred).length;
+    setSectionCount('dropdown-count', `${dropdownsSet}/${settings.dropdowns.length}`, `${dropdownsSet} of ${settings.dropdowns.length} dropdown fields have an answer`);
+
+    const questionsSet = settings.questions.filter((rule) => rule.pattern && rule.value).length;
+    setSectionCount('question-count', `${questionsSet}/${settings.questions.length}`, `${questionsSet} of ${settings.questions.length} question fields have an answer`);
+
+    setSectionCount('rsvp-count', String(document.getElementById('rsvp-form').querySelectorAll('input, select').length), 'RSVP settings');
+
+    const eventCount = (settings.automation.eventList || []).length;
+    setSectionCount('automation-count', `${eventCount} event${eventCount === 1 ? '' : 's'}`, 'Events in the queue');
+  }
+
+  function pendingQuestionKey(label) {
+    return String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  // Entries written before the `open` flag existed only carry `answered`.
+  function isQuestionOpen(question) {
+    return question.open !== undefined ? question.open : !question.answered;
+  }
+
+  // How many distinct events asked a question that this custom field answers.
+  function questionFieldFrequency(rule) {
+    if (!rule.pattern) return 0;
+    const patternKey = pendingQuestionKey(rule.pattern);
+    let regex = null;
+    if (rule.matchType === 'regex') {
+      try {
+        regex = new RegExp(rule.pattern, 'i');
+      } catch {
+        return 0;
+      }
+    }
+    const events = new Set();
+    Object.entries(pendingQuestions).forEach(([key, question]) => {
+      const matches = regex
+        ? regex.test(question.label)
+        : rule.matchType === 'exact'
+          ? key === patternKey
+          : Boolean(patternKey) && (key.includes(patternKey) || patternKey.includes(key));
+      if (matches) (question.events || []).forEach((url) => events.add(url));
+    });
+    return events.size;
+  }
+
+  function loadPendingQuestions() {
+    chrome.storage.local.get([PENDING_QUESTIONS_KEY], (result) => {
+      pendingQuestions = result[PENDING_QUESTIONS_KEY] || {};
+      renderPendingQuestions();
+      refreshQuestionFields();
+    });
+  }
+
+  // Re-sorts / re-counts the custom question fields, unless the user is editing one.
+  function refreshQuestionFields() {
+    const list = document.getElementById('question-list');
+    if (list.contains(document.activeElement)) {
+      list.querySelectorAll('fieldset').forEach((fieldset) => {
+        updateQuestionSummary(fieldset, settings.questions[parseInt(fieldset.dataset.index, 10)]);
+      });
+      return;
+    }
+    hydrateQuestions();
+  }
+
+  function updatePendingQuestion(key, change) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([PENDING_QUESTIONS_KEY], (result) => {
+        const stored = result[PENDING_QUESTIONS_KEY] || {};
+        if (stored[key]) Object.assign(stored[key], change);
+        pendingQuestions = stored;
+        chrome.storage.local.set({ [PENDING_QUESTIONS_KEY]: stored }, resolve);
+      });
+    });
+  }
+
+  function renderPendingQuestions() {
+    const list = document.getElementById('pending-list');
+    // Don't rebuild while the user is typing an answer.
+    if (list.contains(document.activeElement) && document.activeElement.matches('input, select')) return;
+
+    const skipOptional = settings.automation.skipOptionalQuestions !== false;
+    const visible = Object.entries(pendingQuestions)
+      .filter(([, question]) => isQuestionOpen(question) && !question.dismissed && (question.required || !skipOptional))
+      .sort(([, a], [, b]) => Number(b.required) - Number(a.required) || (b.events || []).length - (a.events || []).length);
+
+    document.getElementById('pending-section').hidden = visible.length === 0;
+    setSectionCount('pending-count', `${visible.length} new`, 'Questions waiting for an answer');
+    list.innerHTML = '';
+
+    const template = document.getElementById('pending-template');
+    visible.forEach(([key, question]) => {
+      const node = template.content.cloneNode(true);
+      node.querySelector('.pending-item__label').textContent = question.label;
+      const tag = node.querySelector('.tag');
+      tag.textContent = question.required ? 'Required' : 'Optional';
+      tag.dataset.kind = question.required ? 'required' : 'optional';
+      const eventCount = (question.events || []).length;
+      const events = node.querySelector('.pending-item__events');
+      events.textContent = `asked in ${eventCount} event${eventCount === 1 ? '' : 's'}`;
+      events.title = (question.events || []).join('\n');
+
+      const hasOptions = (question.options || []).length > 0;
+      let control;
+      if (hasOptions) {
+        control = document.createElement('select');
+        control.appendChild(new Option('Choose an answer…', ''));
+        question.options.forEach((option) => control.appendChild(new Option(option, option)));
+      } else {
+        control = document.createElement('input');
+        control.type = 'text';
+        control.maxLength = 500;
+        control.placeholder = question.type === 'dropdown' ? 'Option text to select' : 'Your answer';
+      }
+      control.setAttribute('aria-label', `Answer for ${question.label}`);
+      node.querySelector('.pending-item__control').appendChild(control);
+
+      const save = async () => {
+        const value = control.value.trim();
+        if (!value) {
+          control.focus();
+          return;
+        }
+        settings.questions.push({
+          id: crypto.randomUUID(),
+          matchType: 'exact',
+          pattern: question.label,
+          answerType: question.type === 'dropdown' ? 'dropdown' : 'text',
+          value
+        });
+        await saveSettings('questions');
+        await updatePendingQuestion(key, { open: false });
+        control.blur();
+        hydrateQuestions();
+        renderPendingQuestions();
+      };
+      node.querySelector('.pending-save').addEventListener('click', save);
+      control.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') save();
+      });
+      node.querySelector('.pending-dismiss').addEventListener('click', async () => {
+        await updatePendingQuestion(key, { dismissed: true });
+        renderPendingQuestions();
+      });
+
+      list.appendChild(node);
+    });
   }
 
   function renderAutomationLog() {
@@ -421,6 +641,18 @@
       sendRuntimeMessage({ type: 'automation:clear' });
     });
 
+    document.getElementById('retry-automation').addEventListener('click', () => {
+      sendRuntimeMessage({ type: 'automation:retryNeedsAnswers' });
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[PENDING_QUESTIONS_KEY]) {
+        pendingQuestions = changes[PENDING_QUESTIONS_KEY].newValue || {};
+        renderPendingQuestions();
+        refreshQuestionFields();
+      }
+    });
+
     chrome.storage.onChanged.addListener((changes, area) => {
       const next = changes.settings?.newValue?.automation;
       if (area !== 'local' || !next) return;
@@ -433,6 +665,7 @@
         settings.automation.eventList = next.eventList || [];
         textarea.value = incoming;
         updateEventCount();
+        updateSectionCounts();
       }
     });
 
@@ -472,8 +705,11 @@
       .filter(Boolean);
     settings.automation.maxConcurrent = Math.max(1, parseInt(form.elements.namedItem('maxConcurrent').value, 10) || 1);
     settings.automation.visitDuration = Math.max(120000, parseInt(form.elements.namedItem('visitDuration').value, 10) || 120000);
+    settings.automation.maxRetries = Math.max(0, parseInt(form.elements.namedItem('maxRetries').value, 10) || 0);
     settings.automation.keepTabsOpen = form.elements.namedItem('keepTabsOpen').checked;
     settings.automation.makeTabsVisible = form.elements.namedItem('makeTabsVisible').checked;
+    settings.automation.skipOptionalQuestions = form.elements.namedItem('skipOptionalQuestions').checked;
+    renderPendingQuestions();
     await saveSettings('automation');
     sendRuntimeMessage({ type: 'automation:updateSettings' });
   }
@@ -538,11 +774,28 @@
   }
 
   function updateQuestionSummary(fieldset, rule) {
+    let invalidRegex = false;
+    if (rule.matchType === 'regex' && rule.pattern) {
+      try {
+        new RegExp(rule.pattern, 'i');
+      } catch {
+        invalidRegex = true;
+      }
+    }
+    fieldset.querySelector('input[name="pattern"]').classList.toggle('is-invalid', invalidRegex);
     setFieldSummary(
       fieldset,
       rule.pattern || 'New question field',
-      rule.value ? `→ ${rule.value}` : 'No answer set'
+      invalidRegex ? 'Invalid regex — this field will never match' : rule.value ? `→ ${rule.value}` : 'No answer set'
     );
+    const item = fieldset.closest('.field-item');
+    item?.querySelector('.field-summary').classList.toggle('is-error', invalidRegex);
+    const frequency = questionFieldFrequency(rule);
+    const chip = item?.querySelector('.field-frequency');
+    if (chip) {
+      chip.textContent = frequency ? `${frequency} event${frequency === 1 ? '' : 's'}` : '';
+      chip.title = frequency ? `Asked in ${frequency} event${frequency === 1 ? '' : 's'} so far` : '';
+    }
   }
 
   function setFieldSummary(fieldset, title, summary) {
@@ -608,11 +861,22 @@
   }
 
   function sendRuntimeMessage(payload) {
-    chrome.runtime.sendMessage(payload, () => {
-      if (chrome.runtime.lastError) {
-        console.warn('Runtime message failed', chrome.runtime.lastError);
-      }
-    });
+    const unreachable = 'The extension background is not responding. Reload the extension at chrome://extensions, then reopen this page.';
+    try {
+      chrome.runtime.sendMessage(payload, () => {
+        const error = chrome.runtime.lastError;
+        // "message port closed" just means the background had no reply to send.
+        if (error && !/message port closed/i.test(error.message || '')) {
+          console.warn('Runtime message failed', error);
+          showQueueNotice(unreachable);
+        } else {
+          showQueueNotice('');
+        }
+      });
+    } catch (error) {
+      console.warn('Runtime message failed', error);
+      showQueueNotice(unreachable);
+    }
   }
 
   function deepMerge(target, source) {
