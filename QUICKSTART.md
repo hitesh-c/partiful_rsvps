@@ -64,7 +64,7 @@ Find the 9 default rules and fill your preferred options:
 ```
 ✅ RSVP choice: Going
 ✅ Attendee count: 1 attendee
-☑️  Auto-click Continue: ON (required for automation!)
+☑️  Auto-click Continue: ON (required for bulk runs!)
 ✅ Submit delay: 1000
 ☑️  Include comment: ON (optional)
 ```
@@ -73,7 +73,7 @@ Click **"Save RSVP defaults"**
 
 ---
 
-## Step 3: Run Batch Automation (1 minute)
+## Step 3: Run Bulk RSVP (1 minute)
 
 ### Prepare Event URLs
 Copy your Partiful event links:
@@ -83,25 +83,25 @@ https://partiful.com/e/def456
 https://partiful.com/e/ghi789
 ```
 
-### Start Automation
-1. Scroll to **Automation Queue** section
+### Start the Bulk Run
+1. Scroll to **Bulk RSVP Queue** section
 2. Paste URLs in textarea (one per line)
 3. Settings:
    - Max concurrent tabs: `1`
    - Stay duration: `5000`
-4. Click **"Save automation settings"**
+4. Click **"(settings save as you type)"**
 5. Click **"Start queue"**
 
 ### Watch the Magic! ✨
 ```
-12:30:45 • Starting automation for 3 event(s)
+12:30:45 • Starting bulk RSVP for 3 event(s)
 12:30:46 • Opened tab 123 for event 1
 12:30:51 • Tab 123 completed: Filled 8 questions | Skipped 2
 12:30:52 • Opened tab 124 for event 2
 12:30:57 • Tab 124 completed: Filled 6 questions | Skipped 1
 12:30:58 • Opened tab 125 for event 3
 12:31:03 • Tab 125 completed: Filled 7 questions | Skipped 0
-12:31:04 • Automation queue finished: 3 completed, 0 failed
+12:31:04 • Bulk RSVP finished: 3 completed, 0 failed
 ```
 
 ---
@@ -121,7 +121,7 @@ https://partiful.com/e/ghi789
 
 **Means:**
 - Some fields failed
-- Extension will retry automatically
+- Extension will retry on its own
 - Check your "Stage" dropdown preference
 
 ### Permanent Failure
@@ -145,7 +145,7 @@ https://partiful.com/e/ghi789
 1. Fill profile field (email, name, company, etc.)
 2. Or create custom question rule for that specific question
 
-### ❌ "Automation not starting"
+### ❌ "Queue not starting"
 **Fix:** Make sure "Auto-click Continue" is **ON** in RSVP settings
 
 ---
@@ -164,7 +164,7 @@ Before running 50 events:
 ## You're Ready! 🎉
 
 Your extension will now:
-- ✅ Open each event automatically
+- ✅ Open each event for you
 - ✅ Fill RSVP (Going + attendee count)
 - ✅ Answer questionnaire based on your profile
 - ✅ Match dropdown options intelligently
@@ -193,7 +193,7 @@ After first run:
 
 ### Handle Failures
 Review failed events:
-- Check automation log for reason
+- Check queue log for reason
 - Update settings if needed
 - Re-run just those URLs
 
@@ -205,4 +205,4 @@ See full documentation:
 - [INSTALLATION.md](INSTALLATION.md) - Complete setup guide
 - [README.md](README.md) - Feature overview
 
-**Check automation logs first** - they tell you exactly what happened!
+**Check queue logs first** - they tell you exactly what happened!

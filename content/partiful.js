@@ -49,7 +49,7 @@
     setTimeout(() => {
       runFlow().catch((error) => {
         console.error("[Partiful RSVPs] Flow error", error);
-        fail("Automation error: " + (error?.message || String(error)));
+        fail("Unexpected error: " + (error?.message || String(error)));
       });
     }, delay);
   }
@@ -227,7 +227,7 @@
       }, MAX_WAIT);
 
       if (!afterVerification) {
-        fail("Verification was not completed before the automation timeout.");
+        fail("Verification was not completed before the event timed out.");
         return;
       }
       if (afterVerification.complete) {

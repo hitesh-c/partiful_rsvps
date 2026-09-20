@@ -154,7 +154,7 @@ let statePromise = null;
 function ensureState() {
   if (!statePromise) {
     statePromise = restoreState().catch((error) => {
-      console.error('Failed to restore automation state', error);
+      console.error('Failed to restore queue state', error);
     });
   }
   return statePromise;
@@ -216,7 +216,7 @@ async function runSafely(action, handler) {
     try {
       await appendLog(`⚠️ Could not ${action}: ${error?.message || error}`);
     } catch (logError) {
-      console.error('Could not write to the automation log', logError);
+      console.error('Could not write to the queue log', logError);
     }
   }
 }
@@ -285,14 +285,14 @@ async function setSettings(settings) {
 
 async function startAutomation() {
   if (automationState.status === 'running') {
-    appendLog('Automation already running.');
+    appendLog('Queue is already running.');
     maybeResumeQueue();
     return;
   }
   if (automationState.status === 'paused' && automationState.queue.some((job) => job.status === 'pending')) {
     automationState.status = 'running';
     await updateAutomationSettings({ status: 'running' });
-    appendLog('Automation resumed.');
+    appendLog('Queue resumed.');
     maybeResumeQueue();
     return;
   }
@@ -319,7 +319,7 @@ async function startAutomation() {
   applyAutomationConfig(settings);
 
   await updateAutomationSettings({ status: 'running', progress: automationState.queue });
-  appendLog(`Starting automation for ${eventList.length - invalid.length} event(s).`);
+  appendLog(`Starting bulk RSVP for ${eventList.length - invalid.length} event(s).`);
   if (automationState.makeTabsVisible) {
     appendLog('Debug mode: Tabs will be visible so you can watch the filling.');
   }
@@ -331,12 +331,12 @@ async function startAutomation() {
 
 function pauseAutomation() {
   if (automationState.status !== 'running') {
-    appendLog('Automation is not running.');
+    appendLog('Queue is not running.');
     return;
   }
   automationState.status = 'paused';
   updateAutomationSettings({ status: 'paused' });
-  appendLog('Automation paused. Active tabs will finish current task.');
+  appendLog('Queue paused. Open tabs will finish their current event.');
 }
 
 async function clearAutomation() {
@@ -351,7 +351,7 @@ async function clearAutomation() {
   await persistActiveTabs();
   await Promise.all(closePromises);
   await updateAutomationSettings({ status: 'idle', progress: [], log: [] });
-  appendLog('Automation state cleared.');
+  appendLog('Progress cleared.');
 }
 
 function applyAutomationConfig(settings) {
@@ -437,7 +437,7 @@ async function finishQueueIfDone() {
   const completedCount = automationState.queue.filter((item) => item.status === 'completed').length;
   const failedCount = automationState.queue.filter((item) => item.status === 'failed' || item.status === 'timeout').length;
   const needsCount = automationState.queue.filter((item) => item.status === 'needs_answers').length;
-  appendLog(`Automation queue finished: ${completedCount} completed, ${needsCount} need answers, ${failedCount} failed.`);
+  appendLog(`Bulk RSVP finished: ${completedCount} completed, ${needsCount} need answers, ${failedCount} failed.`);
   if (needsCount) {
     appendLog('Answer the new questions under "Questions to answer", then click "Retry".');
   }

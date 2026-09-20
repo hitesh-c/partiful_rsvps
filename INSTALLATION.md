@@ -19,7 +19,7 @@
 ### 4. Verify Installation
 You should see:
 - ✅ **Partiful RSVPs** card appear in your extensions list
-- ✅ Version: 1.3.1
+- ✅ Version: 1.4.2
 - ✅ Status: Enabled (toggle should be ON/blue)
 
 ### 5. Pin the Extension (Optional but Recommended)
@@ -85,7 +85,7 @@ Example:
 Set your preferences:
 - **RSVP choice**: Going or Can't Go (default: Going)
 - **Attendee count**: e.g., "1 attendee"
-- ✅ **Auto-click Continue** (recommended for automation)
+- ✅ **Auto-click Continue** (recommended for bulk runs)
 - **Submit delay**: 1000ms (wait time before clicking, increase if needed)
 - ✅ **Include comment** (if you want to add your saved comment)
 
@@ -93,7 +93,7 @@ Click **"Save RSVP defaults"**.
 
 ---
 
-## Using Batch Automation
+## Using Bulk RSVP
 
 ### Step 1: Prepare Event URLs
 1. Collect Partiful event URLs (format: `https://partiful.com/e/...`)
@@ -106,14 +106,14 @@ https://partiful.com/e/def456
 https://partiful.com/e/ghi789
 ```
 
-### Step 2: Configure Automation Settings
-In the **Automation Queue** section:
+### Step 2: Configure Bulk RSVP Settings
+In the **Bulk RSVP Queue** section:
 1. Paste your event URLs in the textarea (one per line)
 2. Set **Max concurrent tabs**: 1-5 (recommended: 1 for stability)
 3. Set **Open tab stay duration**: 5000ms (5 seconds default)
-4. Click **"Save automation settings"**
+4. Click **"(settings save as you type)"**
 
-### Step 3: Start Automation
+### Step 3: Start the Bulk Run
 1. Click **"Start queue"** button
 2. Watch the logs appear in real-time below
 3. Extension will:
@@ -123,23 +123,23 @@ In the **Automation Queue** section:
    - Close tab and move to next event
 
 ### Step 4: Monitor Progress
-The automation log shows:
+The queue log shows:
 ```
-12:30:45 • Starting automation for 10 event(s).
+12:30:45 • Starting bulk RSVP for 10 event(s).
 12:30:46 • Opened tab 123 for https://partiful.com/e/abc123
 12:30:51 • Tab 123 completed: Questionnaire submitted | Filled: 8 questions | Skipped: 2
 12:30:52 • Opened tab 124 for https://partiful.com/e/def456
 ...
-12:35:20 • Automation queue finished: 9 completed, 1 failed.
+12:35:20 • Bulk RSVP finished: 9 completed, 1 failed.
 ```
 
-### Step 5: Control Automation
+### Step 5: Control the Bulk Run
 - **Pause**: Click "Pause" to stop processing new events (current tabs finish)
 - **Clear progress**: Click "Clear progress" to reset queue and logs
 
 ---
 
-## Understanding Automation Results
+## Understanding Bulk RSVP Results
 
 ### Success Messages
 ✅ `"Completed: Questionnaire submitted | Filled: 5 questions | Skipped: 2"`
@@ -172,7 +172,7 @@ The log shows exactly what happened:
 2. Check for errors on `chrome://extensions/` page
 3. Click "Errors" button if it appears red
 
-### Automation Not Starting
+### Queue not starting
 1. Verify event URLs are valid Partiful links
 2. Check that "Auto-click Continue" is enabled in RSVP settings
 3. Make sure profile information is filled
@@ -180,7 +180,7 @@ The log shows exactly what happened:
 ### Fields Not Being Filled
 1. Check spelling of dropdown preferences matches exactly
 2. Add fallback options for dropdowns
-3. Review automation log for "Skipped" reasons
+3. Review queue log for "Skipped" reasons
 4. Increase "Submit delay" if page loads slowly
 
 ### Questions Being Skipped
@@ -211,10 +211,9 @@ When you make code changes:
 ## Privacy & Permissions
 
 The extension requires:
-- **storage**: Save your settings locally
-- **scripting**: Inject autofill script on Partiful pages
-- **tabs**: Manage automation tabs
-- **host_permissions**: Access `*.partiful.com` only
+- **storage**: Save your settings locally on your device
+- **alarms**: Per-event timeout while a bulk run is in progress
+- **host_permissions**: `*.partiful.com` (fill RSVP forms) and `www.tech-week.com` (collect event links)
 
 **Your data stays local** - nothing is sent to external servers.
 
@@ -242,7 +241,7 @@ A: Yes, increase "Max concurrent tabs" to 2-5. Use with caution as it's more res
 **Q: Will this work on all Partiful events?**
 A: It works on standard RSVP + questionnaire flows. Some custom event types may need manual handling.
 
-**Q: Can I export automation results?**
+**Q: Can I export bulk RSVP results?**
 A: Not yet - currently logs are shown in the options page only.
 
 **Q: Does it work with private/password-protected events?**

@@ -28,7 +28,7 @@
 
 6. Click "Select" or "Open"
 
-✅ DONE! You should see "Partiful RSVPs v1.3.1" in your extensions list!
+✅ DONE! You should see "Partiful RSVPs v1.4.2" in your extensions list!
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -68,21 +68,21 @@
  STEP 3: TEST WITH ONE EVENT (2 MINUTES)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Before running batch automation, test with ONE event:
+Before running a bulk run, test with ONE event:
 
 1. Copy a Partiful event URL:
    Example: https://partiful.com/e/abc123
 
-2. In Settings → Scroll to "Automation Queue" section
+2. In Settings → Scroll to "Bulk RSVP Queue" section
 
 3. Paste the URL in the textarea
 
-4. Click "Save automation settings"
+4. Click "(settings save as you type)"
 
 5. Click "Start queue"
 
 6. Watch the log appear below:
-   "Starting automation for 1 event(s)..."
+   "Starting bulk RSVP for 1 event(s)..."
    "Opened tab 123 for https://..."
    "Tab 123 completed: Filled 8 questions | Skipped 2"
 
@@ -92,14 +92,14 @@ Before running batch automation, test with ONE event:
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- STEP 4: RUN BATCH AUTOMATION! 🚀
+ STEP 4: RUN BULK RSVP! 🚀
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Now you're ready for the real deal!
 
 1. Collect all your Partiful event URLs
 
-2. Paste them in the "Automation Queue" textarea
+2. Paste them in the "Bulk RSVP Queue" textarea
    ONE URL PER LINE:
    
    https://partiful.com/e/abc123
@@ -107,21 +107,21 @@ Now you're ready for the real deal!
    https://partiful.com/e/ghi789
    ...
 
-3. Click "Save automation settings"
+3. Click "(settings save as you type)"
 
 4. Click "Start queue"
 
 5. Sit back and watch! ✨
 
 The extension will:
-✅ Open each event automatically
+✅ Open each event for you
 ✅ Fill RSVP and questionnaire
-✅ Submit automatically
+✅ Submit for you
 ✅ Retry failures up to 3 times
 ✅ Log detailed results
 
 Final summary:
-"Automation queue finished: 47 completed, 3 failed"
+"Bulk RSVP finished: 47 completed, 3 failed"
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -134,7 +134,7 @@ Final summary:
 
 ⚠️  RETRY:
 "Retry 2/3: Filled: 3 questions | Missing dropdowns: Job title"
-→ Extension retrying automatically, update "Job title" preference
+→ Extension retrying on its own, update "Job title" preference
 
 ❌ FAILED:
 "Failed after 3 attempts: RSVP button not found"
@@ -151,7 +151,7 @@ FIX: Fill in profile fields or add custom question rules
 ❌ "Missing dropdowns: XYZ"
 FIX: Check spelling in dropdown preferences matches EXACTLY
 
-❌ Automation not starting
+❌ Queue not starting
 FIX: Enable "Auto-click Continue" in RSVP settings
 
 ❌ Slow/timing issues
@@ -172,7 +172,7 @@ FIX: Increase "Open tab stay duration" to 7000-10000ms
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ✅ Real autofill success tracking (no more false positives!)
-✅ Automatic retry logic for failed events (up to 3 attempts)
+✅ Built-in retry logic for failed events (up to 3 attempts)
 ✅ Smart settings merge (get new defaults without losing your customizations)
 ✅ Improved dropdown selection reliability
 ✅ Detailed field-level logging
@@ -182,7 +182,7 @@ FIX: Increase "Open tab stay duration" to 7000-10000ms
  READY TO GO! 🎉
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Follow the 4 steps above and you'll be automating Partiful RSVPs in minutes!
+Follow the 4 steps above and you’ll be bulk RSVPing to Partiful events in minutes!
 
 ⏱️  Time to install: 2 minutes
 ⏱️  Time to configure: 5 minutes
@@ -191,4 +191,4 @@ Follow the 4 steps above and you'll be automating Partiful RSVPs in minutes!
 
 Apply to 50 events? Save 100-150 minutes! ⚡
 
-Need help? Check the automation logs - they tell you exactly what happened!
+Need help? Check the queue logs - they tell you exactly what happened!
