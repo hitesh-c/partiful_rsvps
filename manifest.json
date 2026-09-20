@@ -11,8 +11,6 @@
   },
   "permissions": [
     "storage",
-    "scripting",
-    "tabs",
     "alarms"
   ],
   "host_permissions": [
