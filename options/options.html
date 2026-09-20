@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Partiful RSVPs Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <img class="page-header__logo" src="../icons/icon128.png" alt="" width="28" height="28">
+      <h1>Partiful RSVPs</h1>
+      <p>Changes save automatically<span class="save-status" id="save-status" role="status" aria-live="polite" hidden></span></p>
+    </header>
+
+    <div class="layout">
+    <div class="layout__main">
+
+    <section id="profile-section">
+      <details class="section">
+        <summary>
+          <h2>Profile Basics</h2>
+        </summary>
+      <form id="profile-form" class="card grid-2">
+        <label>First name
+          <input type="text" name="firstName" maxlength="100">
+        </label>
+        <label>Last name
+          <input type="text" name="lastName" maxlength="100">
+        </label>
+        <label>Email
+          <input type="email" name="email" required maxlength="500">
+        </label>
+        <label>Full name
+          <input type="text" name="fullName" maxlength="200" placeholder="Leave blank to use first + last name">
+        </label>
+        <label>LinkedIn URL
+          <input type="url" name="linkedin" maxlength="500">
+        </label>
+        <label>Company name
+          <input type="text" name="company" maxlength="200">
+        </label>
+        <label>Job title
+          <input type="text" name="title" maxlength="200" placeholder="Founder, CEO, Engineer...">
+        </label>
+        <label>Industry
+          <input type="text" name="industry" maxlength="200">
+        </label>
+        <label class="span-2">Startup description (1 sentence)
+          <textarea name="startupBlurb" maxlength="500"></textarea>
+        </label>
+        <label class="span-2">Achievement highlight
+          <textarea name="achievement" maxlength="500"></textarea>
+        </label>
+        <label class="span-2">What are you looking for?
+          <textarea name="ask" maxlength="500"></textarea>
+        </label>
+        <label class="span-2">RSVP comment (optional)
+          <textarea name="rsvpComment" maxlength="500"></textarea>
+        </label>
+      </form>
+      </details>
+    </section>
+
+    <section id="dropdown-section">
+      <details class="section">
+        <summary>
+          <h2>Dropdown Fields</h2>
+          <button type="button" class="info-btn" data-info="dropdown-info" aria-expanded="false" aria-controls="dropdown-info" title="How matching works">i</button>
+        </summary>
+      <div class="card">
+        <div class="info-panel" id="dropdown-info" hidden>
+          <strong>How matching works</strong>
+          <ul>
+            <li><b>Label matchers</b> are compared with the question text shown on the Partiful form. The field name is only for you — it is never matched.</li>
+            <li>Matching is loose: case, punctuation and the trailing <code>*</code> are ignored, and it counts as a match if either text contains the other. <code>job title</code> matches “What is your job title? *”.</li>
+            <li>The option is picked loosely too: <code>Founder</code> selects “Founder / CEO”. Fallbacks are tried in order if the preferred option isn’t offered.</li>
+            <li>Use short, distinctive phrases and list several phrasings separated by commas. Very short matchers (like <code>name</code>) can hit the wrong question.</li>
+            <li>A field with an empty preferred option is skipped.</li>
+          </ul>
+        </div>
+        <p>Choose your preferred answer for dropdown questions. Each field matches a question by its label and selects the preferred option.</p>
+        <div id="dropdown-list"></div>
+        <button id="add-dropdown" type="button" class="secondary">Add dropdown field</button>
+      </div>
+      </details>
+    </section>
+
+    <section id="question-section">
+      <details class="section">
+        <summary>
+          <h2>Custom Question Fields</h2>
+          <button type="button" class="info-btn" data-info="question-info" aria-expanded="false" aria-controls="question-info" title="How matching works">i</button>
+        </summary>
+      <div class="card">
+        <div class="info-panel" id="question-info" hidden>
+          <strong>How matching works</strong>
+          <ul>
+            <li>The <b>pattern</b> is compared with the question text shown on the Partiful form. Case, punctuation and the trailing <code>*</code> are ignored.</li>
+            <li><b>Exact</b>: the whole label must equal the pattern. <b>Contains</b> is loose — it matches if either text contains the other. <b>Regex</b> is tested against the raw label, case-insensitive.</li>
+            <li>These fields are checked first, before dropdown fields and your profile details, so keep patterns specific.</li>
+            <li>A field with an empty answer is skipped.</li>
+          </ul>
+        </div>
+        <p>Handle host-specific prompts. Supports exact, contains, or regex label matches.</p>
+        <div id="question-list"></div>
+        <button id="add-question" type="button" class="secondary">Add question field</button>
+      </div>
+      </details>
+    </section>
+
+    <section id="rsvp-section">
+      <details class="section">
+        <summary>
+          <h2>RSVP Defaults</h2>
+        </summary>
+      <form id="rsvp-form" class="card grid-2">
+        <label>RSVP choice
+          <select name="choice">
+            <option value="going">Going</option>
+            <option value="cant_go">Can't Go</option>
+          </select>
+        </label>
+        <label>Attendee count label
+          <input type="text" name="attendeeLabel" maxlength="100" placeholder="e.g. 1 attendee">
+        </label>
+        <label title="Gives Partiful time to finish loading your login before RSVP is clicked">Wait before clicking RSVP
+          <select name="rsvpOpenDelay" data-unit="ms">
+            <option value="3000">3 sec</option>
+            <option value="6000">6 sec</option>
+            <option value="10000">10 sec</option>
+            <option value="15000">15 sec</option>
+          </select>
+        </label>
+        <label title="Pause before each Continue / submit click">Wait before submitting
+          <select name="submitDelay" data-unit="ms">
+            <option value="500">0.5 sec</option>
+            <option value="1000">1 sec</option>
+            <option value="2000">2 sec</option>
+            <option value="3000">3 sec</option>
+          </select>
+        </label>
+        <label class="inline span-2">
+          <input type="checkbox" name="autoSubmit">
+          Automatically continue and submit after filling the RSVP flow
+        </label>
+        <label class="inline span-2">
+          <input type="checkbox" name="includeComment">
+          Include saved comment when available
+        </label>
+      </form>
+      </details>
+    </section>
+
+    </div>
+
+    <aside class="layout__side">
+    <section id="automation-section">
+      <details class="section" open>
+        <summary>
+          <h2>Automation Queue</h2>
+        </summary>
+      <form id="automation-form" class="card">
+        <label>
+          <span>Event URLs <span class="count-chip" id="event-count">0</span></span>
+          <textarea name="eventList" rows="6" placeholder="Paste Partiful event links, one per line"></textarea>
+        </label>
+        <div class="option-row">
+          <label title="How many event tabs run at the same time">Tabs at once
+            <select name="maxConcurrent">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <label title="Give up on an event and move to the next one after this long">Timeout per event
+            <select name="visitDuration" data-unit="ms">
+              <option value="120000">120 sec</option>
+              <option value="180000">180 sec</option>
+              <option value="300000">300 sec</option>
+              <option value="600000">600 sec</option>
+            </select>
+          </label>
+          <label class="inline" title="Open each event in the foreground so you can watch it being filled">
+            <input type="checkbox" name="makeTabsVisible">
+            Show tabs
+          </label>
+          <label class="inline" title="Leave each event tab open when it finishes, for debugging">
+            <input type="checkbox" name="keepTabsOpen">
+            Keep tabs open
+          </label>
+        </div>
+      </form>
+      <div class="card" id="automation-controls">
+        <div class="queue-status">
+          <span class="queue-badge" id="queue-badge" data-state="idle">Idle</span>
+          <span id="queue-summary">No events run yet</span>
+        </div>
+        <div class="queue-bar" aria-hidden="true"><div id="queue-bar-fill"></div></div>
+        <div class="button-row">
+          <button type="button" id="start-automation">Start queue</button>
+          <button type="button" id="pause-automation" class="secondary">Pause</button>
+          <button type="button" id="clear-automation" class="secondary">Clear progress</button>
+        </div>
+        <div id="automation-log"></div>
+      </div>
+      </details>
+    </section>
+    </aside>
+    </div>
+
+    <a
+      class="coffee-button"
+      href="https://www.buymeacoffee.com/hiteshchawla"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <span aria-hidden="true">☕</span>
+      <span>Buy me a coffee</span>
+    </a>
+
+    <footer class="page-footer">
+      <span>Save your profile details once and automate RSVP + questionnaire flows.</span>
+      <span>© 2026 Hitesh Chawla · All rights reserved</span>
+      <a href="https://github.com/hitesh-c" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub · hitesh-c</span>
+      </a>
+    </footer>
+  </main>
+
+
+  <template id="dropdown-template">
+    <details class="field-item">
+      <summary><span class="field-title"></span><span class="field-summary"></span></summary>
+    <fieldset class="dropdown-rule">
+      <label>Field name
+        <input type="text" name="title" placeholder="e.g. Job title" maxlength="120">
+      </label>
+      <label>Label matchers (comma separated)
+        <input type="text" name="matchers" placeholder="What is your job title?,Job title" maxlength="500">
+      </label>
+      <label>Preferred option text
+        <input type="text" name="preferred" maxlength="200">
+      </label>
+      <label>Fallback options (comma separated)
+        <input type="text" name="fallbacks" maxlength="500">
+      </label>
+      <button type="button" class="remove-rule">Remove</button>
+    </fieldset>
+    </details>
+  </template>
+
+  <template id="question-template">
+    <details class="field-item">
+      <summary><span class="field-title"></span><span class="field-summary"></span></summary>
+    <fieldset class="question-rule">
+      <label>Match type
+        <select name="matchType">
+          <option value="exact">Exact</option>
+          <option value="contains">Contains</option>
+          <option value="regex">Regex</option>
+        </select>
+      </label>
+      <label>Pattern
+        <input type="text" name="pattern" maxlength="500">
+      </label>
+      <label>Answer type
+        <select name="answerType">
+          <option value="text">Text input</option>
+          <option value="dropdown">Dropdown</option>
+        </select>
+      </label>
+      <label>Answer value
+        <input type="text" name="value" maxlength="500">
+      </label>
+      <button type="button" class="remove-rule">Remove</button>
+    </fieldset>
+    </details>
+  </template>
+
+  <script src="options.js"></script>
+</body>
+</html>

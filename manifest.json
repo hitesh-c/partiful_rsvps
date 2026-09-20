@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Partiful RSVPs",
+  "version": "1.1",
+  "description": "Automates RSVP and questionnaire flows on Partiful events based on saved profile data.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "scripting",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://*.partiful.com/*",
+    "https://www.tech-week.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options/options.html",
+  "action": {
+    "default_title": "Partiful RSVPs",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.tech-week.com/calendar/*"
+      ],
+      "js": [
+        "content/discover.js"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://*.partiful.com/e/*"
+      ],
+      "js": [
+        "content/partiful.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

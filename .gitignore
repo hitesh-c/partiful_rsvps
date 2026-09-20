@@ -1,0 +1,12 @@
+# Ignore OS-specific files
+.DS_Store
+
+# Ignore packaged extension files
+*.zip
+*.crx
+
+# Ignore dependency directories
+node_modules/
+
+# Ignore log files
+*.log
